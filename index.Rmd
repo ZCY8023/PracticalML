@@ -1,0 +1,132 @@
+---
+title: "Week 4 Assignment"
+output: html_document
+author: CY Zheng
+---
+
+
+## Background and Data
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset). 
+
+
+The training data for this project are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+
+## Loading Data and Libraries
+
+First load the data and the libraries needed.
+```{r message=FALSE, echo=TRUE}
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(ggplot2)
+
+
+training_data <- read.csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv")
+test_data <- read.csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv")
+```
+
+## Processing Data
+First remove the variables with nearly zero variance
+```{r echo=TRUE}
+nearzero <- nearZeroVar(training_data)
+training_data <- training_data[,-nearzero]
+```
+
+Then remove the variables contain more than 95% NAs.
+```{r echo=TRUE}
+MostNA <- colSums(is.na(training_data))/nrow(training_data) < 0.95
+training_data <- training_data[,MostNA]
+```
+
+Next remove the first 5 columns since they are irrelevant to our model.
+```{r echo=TRUE}
+training_data <- training_data[,-(1:5)]
+```
+
+Finally, let us divide the training set into training and cross validation sets.
+```{r echo=TRUE}
+inTrain <- createDataPartition(training_data$classe, p = 0.7, list = FALSE)
+training <- training_data[inTrain,]
+testing <- training_data[-inTrain,]
+dim(training)
+dim(testing)
+```
+
+## Algorithm 1: Decision Tree
+First we predict with decision tree.
+```{r echo=TRUE}
+DTmodFit <- train(classe ~ ., method = 'rpart', data = training)
+DTpred <- predict(DTmodFit, newdata = testing)
+DTconf <- confusionMatrix(DTpred,testing$classe)
+DTconf
+rpart.plot(DTmodFit$finalModel)
+```
+
+The predict accuracy for decision tree is `r round(DTconf$overall['Accuracy'],4)`.
+
+
+
+## Algorithm 2: Random Forest
+Here we need to use parallel processing to speed up computation.
+
+```{r echo=TRUE}
+set.seed(111)
+
+# configure parallel processing and run the model
+library(parallel)
+library(doParallel)
+cluster <- makeCluster(detectCores() - 1) # convention to leave 1 core for OS
+registerDoParallel(cluster)
+
+fitcontrol <-  trainControl(method = "cv", number = 5, allowParallel = TRUE)
+RFmodFit <- train(classe ~ ., data = training, method = 'rf',trControl = fitcontrol)
+RFmodFit
+
+
+# Prediction on test dataset
+RFpred <- predict(RFmodFit,newdata=testing)
+RFconf<- confusionMatrix(RFpred,testing$classe)
+RFconf
+
+# Plot results
+plot(RFconf$table, col = RFconf$byClass,main = 'Random Forest Accurary')
+```
+
+Then we can see that the prediction accuracy is `r round(RFconf$overall['Accuracy'],4)`
+
+
+## Algorithm 3: Boosting
+```{r echo=TRUE}
+
+BOmodFit <- train(classe ~ ., data = training, method = 'gbm',verbose = FALSE)
+BOmodFit
+
+# Prediction on test dataset
+BOpred <- predict(BOmodFit,newdata=testing)
+BOconf<- confusionMatrix(RFpred,testing$classe)
+BOconf
+
+# Plot results
+plot(BOconf$table, col = BOconf$byClass,main = 'Boosting Accurary')
+```
+
+The prediction accuracy is `r round(BOconf$overall['Accuracy'],4)`
+
+## Prediction
+
+By comparing the above three algorithms, it is reasonable to choose the Random Forest algorithm.
+
+```{r}
+predict(RFmodFit,test_data)
+```
+
+
+
+
